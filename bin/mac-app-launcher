@@ -1,0 +1,688 @@
+#!/usr/bin/env python3
+"""
+Obsidian & Sapphire Floating Centered App Launcher for KDE Plasma 6
+Opens dead-center horizontally, floating right above the bottom dock.
+Features:
+- Cohesive Obsidian & Sapphire UI + Tela-circle-blue-dark icons
+- Instant search bar (press Enter to launch top match, Esc to close)
+- Category filter pills (including Pinned/Favorites, Dev, Internet, System, Utilities, Kali)
+- Bottom Footer Bar with:
+  * User Profile & Quick Menu Shortcuts: Settings, Files, Terminal, System Monitor
+  * Power & Session Controls: Sleep, Lock, Log Out, Restart, Power Off (with inline confirmation)
+"""
+
+import configparser
+import getpass
+import glob
+import os
+import re
+import shlex
+import shutil
+import socket
+import subprocess
+import sys
+from PyQt6.QtCore import (
+    QEvent,
+    QRectF,
+    QSize,
+    Qt,
+    QTimer,
+)
+from PyQt6.QtGui import (
+    QColor,
+    QGuiApplication,
+    QIcon,
+    QKeyEvent,
+    QLinearGradient,
+    QPainter,
+    QPainterPath,
+    QPen,
+)
+from PyQt6.QtWidgets import (
+    QApplication,
+    QFrame,
+    QGridLayout,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QPushButton,
+    QScrollArea,
+    QToolButton,
+    QVBoxLayout,
+    QWidget,
+)
+
+TOGGLE_FILE = f"/tmp/mac-app-launcher-toggle-{os.getuid()}"
+
+FAVORITE_KEYWORDS = (
+    "dolphin",
+    "konsole",
+    "systemsettings",
+    "plasma-systemmonitor",
+    "firefox",
+    "antigravity",
+    "kiro",
+    "code",
+    "spectacle",
+    "kalk",
+    "ark",
+    "discover",
+)
+
+
+def load_desktop_apps():
+    seen = set()
+    apps = []
+    dirs = [
+        os.path.expanduser("~/.local/share/applications"),
+        "/usr/share/applications",
+    ]
+    for d in dirs:
+        for path in sorted(glob.glob(os.path.join(d, "*.desktop"))):
+            base = os.path.basename(path)
+            if base == "cyber-launchpad.desktop" or base in seen:
+                continue
+            cp = configparser.ConfigParser(interpolation=None)
+            try:
+                cp.read(path, encoding="utf-8")
+                if "Desktop Entry" not in cp:
+                    continue
+                sec = cp["Desktop Entry"]
+                if sec.get("Type", "") != "Application":
+                    continue
+                if (
+                    sec.get("NoDisplay", "false").lower() == "true"
+                    or sec.get("Hidden", "false").lower() == "true"
+                ):
+                    continue
+                name = sec.get("Name", "").strip()
+                exec_cmd = sec.get("Exec", "").strip()
+                icon_name = sec.get("Icon", "application-x-executable").strip()
+                cats = sec.get("Categories", "")
+                if not name or not exec_cmd:
+                    continue
+                seen.add(base)
+                clean_exec = re.sub(r"%[a-zA-Z]", "", exec_cmd).strip()
+                is_fav = any(
+                    kw in base.lower() or kw in clean_exec.lower()
+                    for kw in FAVORITE_KEYWORDS
+                )
+                apps.append(
+                    {
+                        "name": name,
+                        "exec": clean_exec,
+                        "icon": icon_name,
+                        "categories": cats.lower(),
+                        "favorite": is_fav,
+                    }
+                )
+            except Exception:
+                pass
+    apps.sort(key=lambda x: x["name"].lower())
+    return apps
+
+
+class FloatingAppLauncher(QWidget):
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle("Obsidian App Launcher")
+        self.setWindowFlags(
+            Qt.WindowType.FramelessWindowHint
+            | Qt.WindowType.WindowStaysOnTopHint
+            | Qt.WindowType.Tool
+        )
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+
+        screen = QGuiApplication.primaryScreen().geometry()
+        self.win_w = 684
+        self.win_h = 510
+        self.win_x = (screen.width() - self.win_w) // 2
+        self.win_y = screen.height() - 56 - 18 - self.win_h
+        self.setGeometry(self.win_x, self.win_y, self.win_w, self.win_h)
+
+        QIcon.setThemeName("Tela-circle-blue-dark")
+        self.all_apps = load_desktop_apps()
+        self.filtered_apps = []
+        self.active_category = "all"
+        self.pending_power_action = None
+
+        self._build_ui()
+        self._populate_grid()
+
+        self.ipc_timer = QTimer(self)
+        self.ipc_timer.timeout.connect(self._check_ipc)
+        self.ipc_timer.start(120)
+
+    def _build_ui(self):
+        root = QVBoxLayout(self)
+        root.setContentsMargins(20, 16, 20, 16)
+        root.setSpacing(10)
+
+        # 1. Top Search Row
+        top_row = QHBoxLayout()
+        top_row.setSpacing(10)
+
+        self.search_box = QLineEdit()
+        self.search_box.setPlaceholderText(
+            "Search applications, settings, or tools... (Press Enter to launch)"
+        )
+        self.search_box.setStyleSheet(
+            """
+            QLineEdit {
+                background-color: #151A29;
+                color: #F8FAFC;
+                border: 1px solid #262F48;
+                border-radius: 12px;
+                padding: 9px 14px;
+                font-size: 13px;
+                font-weight: 500;
+            }
+            QLineEdit:focus {
+                border: 1px solid #3B82F6;
+                background-color: #181E30;
+            }
+            """
+        )
+        self.search_box.textChanged.connect(self._populate_grid)
+        self.search_box.returnPressed.connect(self._launch_first)
+        top_row.addWidget(self.search_box)
+
+        self.lbl_count = QLabel("0 Apps")
+        self.lbl_count.setStyleSheet(
+            "color: #94A3B8; font-size: 11px; font-weight: 700; padding: 0 6px;"
+        )
+        top_row.addWidget(self.lbl_count)
+
+        btn_close = QPushButton("✕")
+        btn_close.setFixedSize(32, 32)
+        btn_close.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn_close.setStyleSheet(
+            """
+            QPushButton {
+                background-color: #151A29;
+                color: #94A3B8;
+                border: 1px solid #262F48;
+                border-radius: 16px;
+                font-size: 12px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #E11D48;
+                border: 1px solid #F43F5E;
+                color: #FFFFFF;
+            }
+            """
+        )
+        btn_close.clicked.connect(self.hide)
+        top_row.addWidget(btn_close)
+        root.addLayout(top_row)
+
+        # 2. Category Filter Pills
+        cat_row = QHBoxLayout()
+        cat_row.setSpacing(7)
+        self.cat_buttons = {}
+        categories = [
+            ("all", "All Apps"),
+            ("favorites", "★ Pinned"),
+            ("development", "Development"),
+            ("network", "Internet"),
+            ("system", "System"),
+            ("utility", "Utilities"),
+            ("security", "Security & Kali"),
+        ]
+        for key, label in categories:
+            b = QPushButton(label)
+            b.setCursor(Qt.CursorShape.PointingHandCursor)
+            b.clicked.connect(lambda checked, k=key: self._set_category(k))
+            self.cat_buttons[key] = b
+            cat_row.addWidget(b)
+        cat_row.addStretch()
+        root.addLayout(cat_row)
+        self._update_cat_styles()
+
+        # 3. Scrollable App Grid
+        self.scroll = QScrollArea()
+        self.scroll.setWidgetResizable(True)
+        self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.scroll.setStyleSheet(
+            """
+            QScrollArea {
+                background: transparent;
+                border: none;
+            }
+            QScrollBar:vertical {
+                background: #121624;
+                width: 6px;
+                border-radius: 3px;
+            }
+            QScrollBar::handle:vertical {
+                background: #2E3A59;
+                border-radius: 3px;
+                min-height: 24px;
+            }
+            QScrollBar::handle:vertical:hover {
+                background: #3B82F6;
+            }
+            """
+        )
+        self.grid_container = QWidget()
+        self.grid_container.setStyleSheet("background: transparent;")
+        self.grid_layout = QGridLayout(self.grid_container)
+        self.grid_layout.setContentsMargins(2, 2, 2, 2)
+        self.grid_layout.setHorizontalSpacing(10)
+        self.grid_layout.setVerticalSpacing(10)
+        self.scroll.setWidget(self.grid_container)
+        root.addWidget(self.scroll, 1)
+
+        # 4. Bottom Footer Dock (Menu Shortcuts + Power/Session Controls)
+        self.footer_card = QFrame()
+        self.footer_card.setFixedHeight(48)
+        self.footer_card.setStyleSheet(
+            """
+            QFrame {
+                background-color: #141928;
+                border: 1px solid #242D46;
+                border-radius: 13px;
+            }
+            """
+        )
+        footer_layout = QHBoxLayout(self.footer_card)
+        footer_layout.setContentsMargins(10, 6, 10, 6)
+        footer_layout.setSpacing(6)
+
+        # Standard Footer View
+        self.normal_footer = QWidget()
+        self.normal_footer.setStyleSheet("background: transparent; border: none;")
+        nf_row = QHBoxLayout(self.normal_footer)
+        nf_row.setContentsMargins(0, 0, 0, 0)
+        nf_row.setSpacing(6)
+
+        user_name = getpass.getuser()
+        lbl_user = QLabel(f"● {user_name}")
+        lbl_user.setStyleSheet(
+            "color: #60A5FA; font-size: 11px; font-weight: 800; padding: 0 6px; border: none;"
+        )
+        nf_row.addWidget(lbl_user)
+
+        shortcut_btn_style = """
+            QPushButton {
+                background-color: #1B2236;
+                color: #E2E8F0;
+                border: 1px solid #2B3654;
+                border-radius: 8px;
+                padding: 5px 9px;
+                font-size: 11px;
+                font-weight: 600;
+            }
+            QPushButton:hover {
+                background-color: #2563EB;
+                border: 1px solid #60A5FA;
+                color: #FFFFFF;
+            }
+        """
+        for label, tooltip, cmd in [
+            ("⚙ Settings", "Open KDE System Settings", "systemsettings"),
+            ("📁 Files", "Open Dolphin File Manager", "dolphin"),
+            (">_ Terminal", "Open Konsole Terminal", "konsole"),
+            ("📊 Activity", "Open System Monitor", "plasma-systemmonitor"),
+        ]:
+            b = QPushButton(label)
+            b.setToolTip(tooltip)
+            b.setCursor(Qt.CursorShape.PointingHandCursor)
+            b.setStyleSheet(shortcut_btn_style)
+            b.clicked.connect(lambda checked, c=cmd: self._launch(c))
+            nf_row.addWidget(b)
+
+        nf_row.addStretch()
+
+        power_btn_style = """
+            QPushButton {
+                background-color: #1B2236;
+                color: #F8FAFC;
+                border: 1px solid #2B3654;
+                border-radius: 8px;
+                padding: 5px 8px;
+                font-size: 11px;
+                font-weight: 600;
+            }
+            QPushButton:hover {
+                background-color: #334155;
+                border: 1px solid #60A5FA;
+            }
+        """
+        danger_btn_style = """
+            QPushButton {
+                background-color: #2D1928;
+                color: #FDA4AF;
+                border: 1px solid #881337;
+                border-radius: 8px;
+                padding: 5px 9px;
+                font-size: 11px;
+                font-weight: 700;
+            }
+            QPushButton:hover {
+                background-color: #E11D48;
+                border: 1px solid #F43F5E;
+                color: #FFFFFF;
+            }
+        """
+
+        btn_sleep = QPushButton("🌙 Sleep")
+        btn_sleep.setToolTip("Suspend to RAM")
+        btn_sleep.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn_sleep.setStyleSheet(power_btn_style)
+        btn_sleep.clicked.connect(lambda: self._ask_power("sleep", "Suspend system to sleep?"))
+
+        btn_lock = QPushButton("🔒 Lock")
+        btn_lock.setToolTip("Lock Screen Immediately")
+        btn_lock.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn_lock.setStyleSheet(power_btn_style)
+        btn_lock.clicked.connect(self._do_lock)
+
+        btn_logout = QPushButton("⇥ Log Out")
+        btn_logout.setToolTip("Log out of KDE Plasma session")
+        btn_logout.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn_logout.setStyleSheet(power_btn_style)
+        btn_logout.clicked.connect(
+            lambda: self._ask_power("logout", "Log out of your current desktop session?")
+        )
+
+        btn_reboot = QPushButton("↻ Restart")
+        btn_reboot.setToolTip("Restart computer")
+        btn_reboot.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn_reboot.setStyleSheet(power_btn_style)
+        btn_reboot.clicked.connect(
+            lambda: self._ask_power("reboot", "Restart the computer now?")
+        )
+
+        btn_poweroff = QPushButton("⏻ Power Off")
+        btn_poweroff.setToolTip("Shut down computer")
+        btn_poweroff.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn_poweroff.setStyleSheet(danger_btn_style)
+        btn_poweroff.clicked.connect(
+            lambda: self._ask_power("poweroff", "Shut down and power off the computer?")
+        )
+
+        nf_row.addWidget(btn_sleep)
+        nf_row.addWidget(btn_lock)
+        nf_row.addWidget(btn_logout)
+        nf_row.addWidget(btn_reboot)
+        nf_row.addWidget(btn_poweroff)
+
+        # Inline Confirmation View (hidden until Restart / Power Off / Log Out / Sleep is clicked)
+        self.confirm_footer = QWidget()
+        self.confirm_footer.setVisible(False)
+        self.confirm_footer.setStyleSheet("background: transparent; border: none;")
+        cf_row = QHBoxLayout(self.confirm_footer)
+        cf_row.setContentsMargins(6, 0, 6, 0)
+        cf_row.setSpacing(10)
+
+        self.lbl_confirm = QLabel("Confirm action?")
+        self.lbl_confirm.setStyleSheet(
+            "color: #F8FAFC; font-size: 12px; font-weight: 700; border: none;"
+        )
+        cf_row.addWidget(self.lbl_confirm)
+        cf_row.addStretch()
+
+        btn_yes = QPushButton("✓ Confirm")
+        btn_yes.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn_yes.setStyleSheet(danger_btn_style)
+        btn_yes.clicked.connect(self._execute_power_action)
+
+        btn_cancel = QPushButton("Cancel")
+        btn_cancel.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn_cancel.setStyleSheet(shortcut_btn_style)
+        btn_cancel.clicked.connect(self._cancel_power_action)
+
+        cf_row.addWidget(btn_yes)
+        cf_row.addWidget(btn_cancel)
+
+        footer_layout.addWidget(self.normal_footer)
+        footer_layout.addWidget(self.confirm_footer)
+        root.addWidget(self.footer_card)
+
+    def _do_lock(self):
+        self.hide()
+        subprocess.Popen(
+            ["loginctl", "lock-session"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+
+    def _ask_power(self, action, message):
+        self.pending_power_action = action
+        self.lbl_confirm.setText(f"⚠  {message}")
+        self.normal_footer.setVisible(False)
+        self.confirm_footer.setVisible(True)
+
+    def _cancel_power_action(self):
+        self.pending_power_action = None
+        self.confirm_footer.setVisible(False)
+        self.normal_footer.setVisible(True)
+
+    def _execute_power_action(self):
+        act = self.pending_power_action
+        self._cancel_power_action()
+        self.hide()
+        qdbus_bin = shutil.which("qdbus6") or shutil.which("qdbus") or "qdbus6"
+        if act == "sleep":
+            subprocess.Popen(
+                ["systemctl", "suspend"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+        elif act == "logout":
+            subprocess.Popen(
+                [qdbus_bin, "org.kde.Shutdown", "/Shutdown", "logout"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+        elif act == "reboot":
+            subprocess.Popen(
+                [qdbus_bin, "org.kde.Shutdown", "/Shutdown", "logoutAndReboot"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+        elif act == "poweroff":
+            subprocess.Popen(
+                [qdbus_bin, "org.kde.Shutdown", "/Shutdown", "logoutAndShutdown"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+
+    def _update_cat_styles(self):
+        for k, btn in self.cat_buttons.items():
+            if k == self.active_category:
+                btn.setStyleSheet(
+                    """
+                    QPushButton {
+                        background-color: #2563EB;
+                        color: #F8FAFC;
+                        border: 1px solid #60A5FA;
+                        border-radius: 10px;
+                        padding: 5px 11px;
+                        font-size: 11px;
+                        font-weight: 700;
+                    }
+                    """
+                )
+            else:
+                btn.setStyleSheet(
+                    """
+                    QPushButton {
+                        background-color: #151A29;
+                        color: #94A3B8;
+                        border: 1px solid #242D46;
+                        border-radius: 10px;
+                        padding: 5px 11px;
+                        font-size: 11px;
+                        font-weight: 600;
+                    }
+                    QPushButton:hover {
+                        background-color: #1E253A;
+                        color: #F8FAFC;
+                    }
+                    """
+                )
+
+    def _set_category(self, cat):
+        self.active_category = cat
+        self._update_cat_styles()
+        self._populate_grid()
+
+    def _resolve_icon(self, icon_name):
+        if os.path.isabs(icon_name) and os.path.exists(icon_name):
+            return QIcon(icon_name)
+        ic = QIcon.fromTheme(icon_name)
+        if not ic.isNull():
+            return ic
+        return QIcon.fromTheme("application-x-executable")
+
+    def _populate_grid(self):
+        while self.grid_layout.count():
+            item = self.grid_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+
+        query = self.search_box.text().strip().lower()
+        filtered = []
+        for app in self.all_apps:
+            if query and query not in app["name"].lower() and query not in app["exec"].lower():
+                continue
+            if self.active_category != "all":
+                if self.active_category == "favorites":
+                    if not app["favorite"]:
+                        continue
+                elif self.active_category == "security":
+                    if "security" not in app["categories"] and "kali" not in app["categories"]:
+                        continue
+                elif self.active_category not in app["categories"]:
+                    continue
+            filtered.append(app)
+
+        self.filtered_apps = filtered
+        self.lbl_count.setText(f"{len(filtered)} Apps")
+
+        cols = 5
+        btn_style = """
+            QToolButton {
+                background-color: #151A29;
+                color: #F8FAFC;
+                border: 1px solid #222B42;
+                border-radius: 13px;
+                padding: 8px 4px;
+                font-size: 11px;
+                font-weight: 600;
+            }
+            QToolButton:hover {
+                background-color: #1E2942;
+                border: 1px solid #3B82F6;
+            }
+        """
+        for idx, app in enumerate(filtered[:70]):
+            row = idx // cols
+            col = idx % cols
+            btn = QToolButton()
+            btn.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextUnderIcon)
+            btn.setIcon(self._resolve_icon(app["icon"]))
+            btn.setIconSize(QSize(44, 44))
+            short_name = app["name"] if len(app["name"]) <= 15 else app["name"][:13] + "…"
+            btn.setText(short_name)
+            btn.setToolTip(app["name"])
+            btn.setFixedSize(118, 86)
+            btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            btn.setStyleSheet(btn_style)
+            btn.clicked.connect(lambda checked, cmd=app["exec"]: self._launch(cmd))
+            self.grid_layout.addWidget(btn, row, col)
+
+    def _launch_first(self):
+        if self.filtered_apps:
+            self._launch(self.filtered_apps[0]["exec"])
+
+    def _launch(self, cmd):
+        self._cancel_power_action()
+        self.hide()
+        try:
+            args = shlex.split(cmd)
+            subprocess.Popen(
+                args,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                start_new_session=True,
+            )
+        except Exception:
+            subprocess.Popen(
+                cmd,
+                shell=True,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                start_new_session=True,
+            )
+
+    def toggle_popup(self):
+        if self.isVisible():
+            self.hide()
+        else:
+            self._cancel_power_action()
+            self.search_box.clear()
+            self.setGeometry(self.win_x, self.win_y, self.win_w, self.win_h)
+            self.show()
+            self.raise_()
+            self.activateWindow()
+            self.search_box.setFocus()
+
+    def _check_ipc(self):
+        if os.path.exists(TOGGLE_FILE):
+            try:
+                os.remove(TOGGLE_FILE)
+            except Exception:
+                pass
+            self.toggle_popup()
+
+    def keyPressEvent(self, event: QKeyEvent):
+        if event.key() == Qt.Key.Key_Escape:
+            if self.pending_power_action:
+                self._cancel_power_action()
+            else:
+                self.hide()
+        else:
+            super().keyPressEvent(event)
+
+    def event(self, event):
+        if event.type() == QEvent.Type.WindowDeactivate and self.isVisible():
+            self._cancel_power_action()
+            self.hide()
+        return super().event(event)
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+
+        rect = QRectF(1.5, 1.5, self.width() - 3.0, self.height() - 3.0)
+        path = QPainterPath()
+        path.addRoundedRect(rect, 20.0, 20.0)
+
+        grad = QLinearGradient(0, 0, 0, self.height())
+        grad.setColorAt(0.0, QColor(15, 18, 29, 248))
+        grad.setColorAt(1.0, QColor(9, 11, 18, 252))
+        painter.fillPath(path, grad)
+
+        painter.setPen(QPen(QColor(96, 165, 250, 58), 1.2))
+        painter.drawPath(path)
+
+
+def main():
+    if "--toggle" in sys.argv:
+        with open(TOGGLE_FILE, "w") as f:
+            f.write("1")
+        return
+
+    app = QApplication(sys.argv)
+    launcher = FloatingAppLauncher()
+    if "--show" in sys.argv:
+        launcher.toggle_popup()
+    sys.exit(app.exec())
+
+
+if __name__ == "__main__":
+    main()

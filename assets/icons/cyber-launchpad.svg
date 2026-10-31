@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
+  <defs>
+    <linearGradient id="sapphireBg" x1="10" y1="6" x2="54" y2="58" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#3B82F6"/>
+      <stop offset="55%" stop-color="#2563EB"/>
+      <stop offset="100%" stop-color="#1D4ED8"/>
+    </linearGradient>
+    <linearGradient id="innerShine" x1="16" y1="12" x2="48" y2="52" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0.96"/>
+      <stop offset="100%" stop-color="#DBEAFE" stop-opacity="0.82"/>
+    </linearGradient>
+    <linearGradient id="accentTile" x1="34" y1="16" x2="48" y2="30" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#93C5FD"/>
+      <stop offset="100%" stop-color="#60A5FA"/>
+    </linearGradient>
+  </defs>
+  <!-- Exact 27px radius circle matching Tela-circle-blue-dark -->
+  <circle cx="32" cy="32" r="27" fill="url(#sapphireBg)"/>
+  <circle cx="32" cy="32" r="26.3" fill="none" stroke="#93C5FD" stroke-opacity="0.35" stroke-width="1.2"/>
+  <!-- 4 Crisp Bento Grid Squares -->
+  <rect x="18" y="18" width="11.5" height="11.5" rx="3.4" fill="url(#innerShine)"/>
+  <rect x="34.5" y="18" width="11.5" height="11.5" rx="3.4" fill="url(#accentTile)" transform="rotate(12 40.25 23.75)"/>
+  <rect x="18" y="34.5" width="11.5" height="11.5" rx="3.4" fill="url(#innerShine)" fill-opacity="0.85"/>
+  <rect x="34.5" y="34.5" width="11.5" height="11.5" rx="3.4" fill="url(#innerShine)"/>
+</svg>

@@ -1,0 +1,130 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+RAW_CHOICE="Tela-circle-blue-dark"
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --icons)
+            RAW_CHOICE="${2:-blue}"
+            shift 2
+            ;;
+        *)
+            RAW_CHOICE="$1"
+            shift
+            ;;
+    esac
+done
+
+case "$RAW_CHOICE" in
+    blue|Tela-circle-blue-dark)     ICON_THEME="Tela-circle-blue-dark" ;;
+    purple|Tela-circle-purple-dark) ICON_THEME="Tela-circle-purple-dark" ;;
+    dracula|Tela-circle-dracula-dark) ICON_THEME="Tela-circle-dracula-dark" ;;
+    candy|candy-icons)              ICON_THEME="candy-icons" ;;
+    *)                              ICON_THEME="$RAW_CHOICE" ;;
+esac
+
+KWRITE=$(command -v kwriteconfig6 || command -v kwriteconfig5 || echo "kwriteconfig6")
+QDBUS=$(command -v qdbus6 || command -v qdbus || command -v qdbus-qt5 || echo "qdbus6")
+
+echo "✨ Applying Obsidian & Sapphire Desktop Experience (Icons: $ICON_THEME)..."
+
+# 1. Sync ObsidianSapphire palette into Plasma theme & apply Color Scheme, Icons, Cursors, Wallpaper
+cp -f "$HOME/.local/share/color-schemes/ObsidianSapphire.colors" "$HOME/.local/share/plasma/desktoptheme/WhiteSur-dark/colors" 2>/dev/null || true
+plasma-apply-colorscheme ObsidianSapphire 2>/dev/null || true
+plasma-apply-desktoptheme WhiteSur-dark 2>/dev/null || true
+plasma-apply-cursortheme WhiteSur-cursors 2>/dev/null || true
+plasma-apply-wallpaperimage "$HOME/.local/share/wallpapers/Obsidian-Sapphire.png" 2>/dev/null || true
+
+"$KWRITE" --file kdeglobals --group Icons --key Theme "$ICON_THEME"
+"$KWRITE" --file kcminputrc --group Mouse --key cursorTheme WhiteSur-cursors
+"$KWRITE" --file plasmarc --group Theme --key name WhiteSur-dark
+
+# Update GTK3 / GTK4 icon theme and right-side window buttons (Windows style)
+mkdir -p "$HOME/.config/gtk-3.0" "$HOME/.config/gtk-4.0"
+for gtk_ini in "$HOME/.config/gtk-3.0/settings.ini" "$HOME/.config/gtk-4.0/settings.ini"; do
+    cat << EOF > "$gtk_ini"
+[Settings]
+gtk-application-prefer-dark-theme=true
+gtk-icon-theme-name=$ICON_THEME
+gtk-decoration-layout=icon:minimize,maximize,close
+EOF
+done
+
+# 2. Configure Window Decorations: Windows-style RIGHT side (Minimize, Maximize, Close = IAX)
+"$KWRITE" --file kwinrc --group org.kde.kdecoration2 --key library org.kde.kwin.aurorae
+"$KWRITE" --file kwinrc --group org.kde.kdecoration2 --key theme "__aurorae__svg__WhiteSur-dark"
+"$KWRITE" --file kwinrc --group org.kde.kdecoration2 --key ButtonsOnLeft "M"
+"$KWRITE" --file kwinrc --group org.kde.kdecoration2 --key ButtonsOnRight "IAX"
+"$KWRITE" --file kwinrc --group org.kde.kdecoration2 --key BorderSize "None"
+
+# 3. Disable Top-Left Hot Corner toggle
+"$KWRITE" --file kwinrc --group ElectricBorders --key TopLeft "None"
+
+# 4. Dynamically detect installed user applications for the Bottom Floating Dock
+LAUNCHERS="applications:cyber-launchpad.desktop,preferred://filemanager"
+for candidate in org.kde.konsole.desktop antigravity.desktop kiro.desktop code.desktop firefox-esr.desktop firefox.desktop google-chrome.desktop brave-browser.desktop systemsettings.desktop; do
+    if [[ -f "/usr/share/applications/$candidate" || -f "$HOME/.local/share/applications/$candidate" ]]; then
+        LAUNCHERS="${LAUNCHERS},applications:${candidate}"
+    fi
+done
+
+# 5. Configure Top Menu Bar (No top-left icon/toggle) + Bottom Floating Dock
+cat << EOF > /tmp/obsidian_layout.js
+var allPanels = panels();
+for (var i = 0; i < allPanels.length; i++) {
+    allPanels[i].remove();
+}
+
+// --- 1. TOP MENU BAR ---
+var topBar = new Panel;
+topBar.location = "top";
+topBar.height = 28;
+topBar.floating = false;
+topBar.alignment = "center";
+
+topBar.addWidget("org.kde.plasma.appmenu");
+
+var topSpacer = topBar.addWidget("org.kde.plasma.panelspacer");
+topSpacer.currentConfigGroup = ["General"];
+topSpacer.writeConfig("expanding", "true");
+
+topBar.addWidget("org.kde.plasma.systemtray");
+
+var clock = topBar.addWidget("org.kde.plasma.digitalclock");
+clock.currentConfigGroup = ["Appearance"];
+clock.writeConfig("showDate", "true");
+clock.writeConfig("dateDisplayFormat", "BesideTime");
+clock.writeConfig("use24hFormat", "0");
+
+topBar.addWidget("org.kde.plasma.showdesktop");
+
+// --- 2. BOTTOM FLOATING DOCK ---
+var dock = new Panel;
+dock.location = "bottom";
+dock.height = 56;
+dock.floating = true;
+dock.alignment = "center";
+dock.lengthMode = "fit";
+dock.hiding = "windowsgobelow";
+
+var tasks = dock.addWidget("org.kde.plasma.icontasks");
+tasks.currentConfigGroup = ["General"];
+tasks.writeConfig("launchers", "${LAUNCHERS}");
+tasks.writeConfig("iconSpacing", "1");
+
+dock.addWidget("org.kde.plasma.marginsseparator");
+dock.addWidget("org.kde.plasma.trash");
+EOF
+
+"$QDBUS" org.kde.plasmashell /PlasmaShell org.kde.PlasmaShell.evaluateScript "$(cat /tmp/obsidian_layout.js)" || true
+rm -f /tmp/obsidian_layout.js
+
+# 6. Apply Speed Boost & Reconfigure KWin
+"$HOME/.local/bin/mac-speed-boost"
+
+# 7. Restart Dynamic Island, Right-Side Monitor Bar & Floating Centered App Launcher
+systemctl --user daemon-reload
+systemctl --user enable --now mac-dynamic-island.service mac-side-monitor.service mac-app-launcher.service
+systemctl --user restart mac-dynamic-island.service mac-side-monitor.service mac-app-launcher.service
+
+echo "✅ Obsidian & Sapphire Desktop Experience is live!"

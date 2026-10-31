@@ -1,0 +1,13 @@
+[Unit]
+Description=Obsidian & Sapphire Right Sticky Hardware & Thermal Monitor Bar
+PartOf=graphical-session.target
+After=graphical-session.target plasma-plasmashell.service
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/mac-side-monitor
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=graphical-session.target default.target

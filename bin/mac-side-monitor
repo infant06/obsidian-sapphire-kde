@@ -1,0 +1,530 @@
+#!/usr/bin/env python3
+"""
+Obsidian & Sapphire Right-Side Sticky Hardware & Thermal Monitor Bar
+Universal Edition: Supports Intel, AMD, and NVIDIA GPUs/CPUs across all Linux distros.
+"""
+
+import glob
+import os
+import shutil
+import subprocess
+import sys
+from PyQt6.QtCore import (
+    QRect,
+    QRectF,
+    Qt,
+    QTimer,
+)
+from PyQt6.QtGui import (
+    QColor,
+    QFont,
+    QGuiApplication,
+    QLinearGradient,
+    QPainter,
+    QPainterPath,
+    QPen,
+)
+from PyQt6.QtWidgets import QApplication, QWidget
+
+TOGGLE_FILE = f"/tmp/mac-side-monitor-toggle-{os.getuid()}"
+HAS_NVIDIA_SMI = shutil.which("nvidia-smi") is not None
+
+
+def read_file(path):
+    try:
+        with open(path, "r") as f:
+            return f.read().strip()
+    except Exception:
+        return ""
+
+
+class HardwareReader:
+    def __init__(self):
+        self.prev_idle = 0
+        self.prev_total = 0
+        self.hwmon_map = {}
+        self._scan_hwmon()
+
+    def _scan_hwmon(self):
+        for path in glob.glob("/sys/class/hwmon/hwmon*"):
+            name = read_file(os.path.join(path, "name"))
+            if name:
+                self.hwmon_map[name] = path
+
+    def get_cpu_usage_and_freq(self):
+        usage = 0.0
+        try:
+            with open("/proc/stat", "r") as f:
+                line = f.readline()
+            parts = [int(x) for x in line.split()[1:]]
+            idle = parts[3] + (parts[4] if len(parts) > 4 else 0)
+            total = sum(parts)
+            diff_total = total - self.prev_total
+            diff_idle = idle - self.prev_idle
+            if diff_total > 0 and self.prev_total > 0:
+                usage = max(0.0, min(100.0, (1.0 - diff_idle / diff_total) * 100.0))
+            self.prev_total = total
+            self.prev_idle = idle
+        except Exception:
+            pass
+
+        freq_ghz = 0.0
+        cur_f = read_file("/sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq")
+        if cur_f:
+            try:
+                freq_ghz = int(cur_f) / 1_000_000.0
+            except ValueError:
+                pass
+        return round(usage), round(freq_ghz, 2)
+
+    def get_cpu_temp(self):
+        for key in ("k10temp", "coretemp", "zenpower", "cpu_thermal", "acpitz_0", "acpitz"):
+            hw = self.hwmon_map.get(key)
+            if hw:
+                raw = read_file(os.path.join(hw, "temp1_input"))
+                if raw:
+                    try:
+                        return round(int(raw) / 1000.0, 1)
+                    except ValueError:
+                        pass
+        for tz in sorted(glob.glob("/sys/class/thermal/thermal_zone*/temp")):
+            raw = read_file(tz)
+            if raw:
+                try:
+                    val = int(raw) / 1000.0
+                    if 15.0 < val < 115.0:
+                        return round(val, 1)
+                except ValueError:
+                    pass
+        return 45.0
+
+    def get_gpu_stats(self):
+        gpu_load = 0
+        for p in glob.glob("/sys/class/drm/card*/device/gpu_busy_percent"):
+            val = read_file(p)
+            if val:
+                try:
+                    gpu_load = max(gpu_load, int(val))
+                except ValueError:
+                    pass
+
+        gpu_temp = 45.0
+        gpu_mhz = 200
+        hw = self.hwmon_map.get("amdgpu") or self.hwmon_map.get("i915") or self.hwmon_map.get("xe")
+        if hw:
+            t_raw = read_file(os.path.join(hw, "temp1_input"))
+            if t_raw:
+                try:
+                    gpu_temp = round(int(t_raw) / 1000.0, 1)
+                except ValueError:
+                    pass
+            f_raw = read_file(os.path.join(hw, "freq1_input"))
+            if f_raw:
+                try:
+                    gpu_mhz = round(int(f_raw) / 1_000_000)
+                except ValueError:
+                    pass
+            return gpu_load, gpu_temp, gpu_mhz
+
+        # Fallback for NVIDIA GPUs via nvidia-smi
+        if HAS_NVIDIA_SMI:
+            try:
+                res = subprocess.run(
+                    [
+                        "nvidia-smi",
+                        "--query-gpu=utilization.gpu,temperature.gpu,clocks.current.graphics",
+                        "--format=csv,noheader,nounits",
+                    ],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.DEVNULL,
+                    text=True,
+                    timeout=1.0,
+                )
+                line = res.stdout.strip().splitlines()[0]
+                parts = [x.strip() for x in line.split(",")]
+                if len(parts) >= 3:
+                    return int(parts[0]), float(parts[1]), int(parts[2])
+            except Exception:
+                pass
+
+        return gpu_load, gpu_temp, gpu_mhz
+
+    def get_ram_stats(self):
+        mem = {}
+        try:
+            with open("/proc/meminfo", "r") as f:
+                for line in f:
+                    parts = line.split(":")
+                    if len(parts) == 2:
+                        k = parts[0].strip()
+                        v = int(parts[1].strip().split()[0])
+                        mem[k] = v
+            total_kb = mem.get("MemTotal", 1)
+            avail_kb = mem.get("MemAvailable", total_kb)
+            used_kb = max(0, total_kb - avail_kb)
+            pct = round((used_kb / total_kb) * 100)
+            used_gb = round(used_kb / (1024 * 1024), 1)
+            total_gb = round(total_kb / (1024 * 1024), 1)
+
+            swap_total = mem.get("SwapTotal", 0)
+            swap_free = mem.get("SwapFree", 0)
+            swap_used_gb = round(max(0, swap_total - swap_free) / (1024 * 1024), 1)
+            return pct, used_gb, total_gb, swap_used_gb
+        except Exception:
+            return 40, 3.2, 8.0, 0.0
+
+    def get_nvme_temp(self):
+        for key in ("nvme", "drivetemp"):
+            hw = self.hwmon_map.get(key)
+            if hw:
+                raw = read_file(os.path.join(hw, "temp1_input"))
+                if raw:
+                    try:
+                        return round(int(raw) / 1000.0, 1)
+                    except ValueError:
+                        pass
+        return self.get_cpu_temp()
+
+
+class RightStickyMonitorBar(QWidget):
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle("Obsidian Hardware Monitor")
+        self.setWindowFlags(
+            Qt.WindowType.FramelessWindowHint
+            | Qt.WindowType.WindowStaysOnTopHint
+            | Qt.WindowType.Tool
+            | Qt.WindowType.WindowDoesNotAcceptFocus
+        )
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+        self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating, True)
+        self.setMouseTracking(True)
+
+        screen = QGuiApplication.primaryScreen().geometry()
+        self.screen_w = screen.width()
+        self.screen_h = screen.height()
+
+        self.full_w = 144
+        self.collapsed_w = 30
+        self.bar_h = 342
+
+        self.current_w = self.full_w
+        self.pos_y = (self.screen_h - self.bar_h) // 2
+        self.collapsed = False
+        self.drag_offset_y = None
+
+        self.reader = HardwareReader()
+        self.metrics = {
+            "cpu_pct": 12,
+            "cpu_ghz": 2.1,
+            "cpu_temp": 48.5,
+            "gpu_pct": 4,
+            "gpu_temp": 48.0,
+            "gpu_mhz": 200,
+            "ram_pct": 45,
+            "ram_used": 3.5,
+            "ram_total": 7.8,
+            "swap_used": 0.0,
+            "nvme_temp": 55.0,
+        }
+
+        self._update_geo(self.full_w)
+        self._poll_metrics()
+
+        self.timer = QTimer(self)
+        self.timer.timeout.connect(self._poll_metrics)
+        self.timer.start(1500)
+
+        self.ipc_timer = QTimer(self)
+        self.ipc_timer.timeout.connect(self._check_ipc)
+        self.ipc_timer.start(220)
+
+    def _check_ipc(self):
+        if os.path.exists(TOGGLE_FILE):
+            try:
+                os.remove(TOGGLE_FILE)
+            except Exception:
+                pass
+            self.toggle_collapse()
+
+    def _update_geo(self, w):
+        self.current_w = w
+        self.setGeometry(self.screen_w - w, self.pos_y, w, self.bar_h)
+        self.update()
+
+    def toggle_collapse(self):
+        self.collapsed = not self.collapsed
+        self._update_geo(self.collapsed_w if self.collapsed else self.full_w)
+
+    def _poll_metrics(self):
+        cpu_pct, cpu_ghz = self.reader.get_cpu_usage_and_freq()
+        cpu_temp = self.reader.get_cpu_temp()
+        gpu_pct, gpu_temp, gpu_mhz = self.reader.get_gpu_stats()
+        ram_pct, ram_used, ram_total, swap_used = self.reader.get_ram_stats()
+        nvme_temp = self.reader.get_nvme_temp()
+
+        self.metrics = {
+            "cpu_pct": cpu_pct,
+            "cpu_ghz": cpu_ghz,
+            "cpu_temp": cpu_temp,
+            "gpu_pct": gpu_pct,
+            "gpu_temp": gpu_temp,
+            "gpu_mhz": gpu_mhz,
+            "ram_pct": ram_pct,
+            "ram_used": ram_used,
+            "ram_total": ram_total,
+            "swap_used": swap_used,
+            "nvme_temp": nvme_temp,
+        }
+        self.update()
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            if self.collapsed or event.position().x() <= 20:
+                self.toggle_collapse()
+            else:
+                self.drag_offset_y = int(event.globalPosition().y()) - self.pos_y
+
+    def mouseMoveEvent(self, event):
+        if self.drag_offset_y is not None:
+            new_y = int(event.globalPosition().y()) - self.drag_offset_y
+            self.pos_y = max(36, min(self.screen_h - self.bar_h - 64, new_y))
+            self._update_geo(self.current_w)
+
+    def mouseReleaseEvent(self, event):
+        self.drag_offset_y = None
+
+    def _temp_color(self, temp_c):
+        if temp_c < 60:
+            return QColor(16, 185, 129)
+        elif temp_c < 75:
+            return QColor(245, 158, 11)
+        return QColor(244, 63, 94)
+
+    def _draw_section_card(
+        self, painter, x, y, w, h, title, main_pct, temp_c, sub_text
+    ):
+        card_rect = QRectF(x, y, w, h)
+        card_path = QPainterPath()
+        card_path.addRoundedRect(card_rect, 11.0, 11.0)
+        painter.fillPath(card_path, QColor(21, 26, 41, 235))
+        painter.setPen(QPen(QColor(36, 45, 70, 255), 1.0))
+        painter.drawPath(card_path)
+
+        painter.setFont(QFont("Noto Sans", 8, QFont.Weight.ExtraBold))
+        painter.setPen(QColor(148, 163, 184))
+        painter.drawText(
+            QRect(int(x + 9), int(y + 7), 50, 14), Qt.AlignmentFlag.AlignLeft, title
+        )
+
+        if temp_c is not None:
+            t_col = self._temp_color(temp_c)
+            badge_rect = QRectF(x + w - 46, y + 6, 38, 15)
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QColor(t_col.red(), t_col.green(), t_col.blue(), 32))
+            painter.drawRoundedRect(badge_rect, 5.0, 5.0)
+            painter.setPen(t_col)
+            painter.setFont(QFont("Noto Sans", 7, QFont.Weight.Bold))
+            painter.drawText(
+                badge_rect.toRect(),
+                Qt.AlignmentFlag.AlignCenter,
+                f"{temp_c:.0f}°C",
+            )
+
+        painter.setPen(QColor(248, 250, 252))
+        painter.setFont(QFont("Noto Sans", 14, QFont.Weight.Bold))
+        painter.drawText(
+            QRect(int(x + 9), int(y + 22), int(w - 18), 22),
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+            f"{main_pct}%",
+        )
+
+        painter.setPen(QColor(148, 163, 184))
+        painter.setFont(QFont("Noto Sans", 7, QFont.Weight.DemiBold))
+        painter.drawText(
+            QRect(int(x + 9), int(y + 24), int(w - 18), 20),
+            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
+            sub_text,
+        )
+
+        bar_bg = QRectF(x + 9, y + h - 13, w - 18, 5.0)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QColor(30, 39, 61))
+        painter.drawRoundedRect(bar_bg, 2.5, 2.5)
+
+        fill_w = max(4.0, (w - 18) * (min(100, max(0, main_pct)) / 100.0))
+        bar_fg = QRectF(x + 9, y + h - 13, fill_w, 5.0)
+        bar_grad = QLinearGradient(x + 9, 0, x + w - 9, 0)
+        bar_grad.setColorAt(0.0, QColor(59, 130, 246))
+        bar_grad.setColorAt(1.0, QColor(99, 102, 241))
+        painter.setBrush(bar_grad)
+        painter.drawRoundedRect(bar_fg, 2.5, 2.5)
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+
+        rect = QRectF(1.0, 1.0, self.width() + 14.0, self.height() - 2.0)
+        path = QPainterPath()
+        path.addRoundedRect(rect, 18.0, 18.0)
+
+        grad = QLinearGradient(0, 0, 0, self.height())
+        grad.setColorAt(0.0, QColor(15, 18, 29, 246))
+        grad.setColorAt(1.0, QColor(9, 11, 18, 250))
+        painter.fillPath(path, grad)
+
+        painter.setPen(QPen(QColor(96, 165, 250, 52), 1.1))
+        painter.drawPath(path)
+
+        m = self.metrics
+
+        if self.current_w <= 42:
+            painter.setFont(QFont("Noto Sans", 8, QFont.Weight.Bold))
+            painter.setPen(QColor(96, 165, 250))
+            painter.drawText(
+                QRect(0, 10, self.width(), 18), Qt.AlignmentFlag.AlignCenter, "‹"
+            )
+
+            items = [
+                ("CPU", f"{m['cpu_pct']}%", f"{m['cpu_temp']:.0f}°"),
+                ("GPU", f"{m['gpu_pct']}%", f"{m['gpu_temp']:.0f}°"),
+                ("RAM", f"{m['ram_pct']}%", f"{m['ram_used']:.0f}G"),
+            ]
+            y_off = 42
+            for lbl, pct_s, sub_s in items:
+                painter.setPen(QColor(100, 116, 139))
+                painter.setFont(QFont("Noto Sans", 6, QFont.Weight.Bold))
+                painter.drawText(
+                    QRect(0, y_off, self.width(), 13), Qt.AlignmentFlag.AlignCenter, lbl
+                )
+                painter.setPen(QColor(248, 250, 252))
+                painter.setFont(QFont("Noto Sans", 7, QFont.Weight.Bold))
+                painter.drawText(
+                    QRect(0, y_off + 13, self.width(), 14),
+                    Qt.AlignmentFlag.AlignCenter,
+                    pct_s,
+                )
+                painter.setPen(QColor(96, 165, 250))
+                painter.drawText(
+                    QRect(0, y_off + 27, self.width(), 14),
+                    Qt.AlignmentFlag.AlignCenter,
+                    sub_s,
+                )
+                y_off += 88
+            return
+
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QColor(59, 130, 246, 95))
+        painter.drawRoundedRect(
+            QRectF(5.5, self.height() / 2.0 - 18.0, 3.0, 36.0), 1.5, 1.5
+        )
+
+        painter.setPen(QColor(96, 165, 250))
+        painter.setFont(QFont("Noto Sans", 7, QFont.Weight.ExtraBold))
+        painter.drawText(
+            QRect(15, 10, self.width() - 24, 16),
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+            "● TELEMETRY",
+        )
+        painter.setPen(QColor(148, 163, 184))
+        painter.drawText(
+            QRect(15, 10, self.width() - 22, 16),
+            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
+            "›",
+        )
+
+        card_x = 15.0
+        card_w = self.width() - 23.0
+        card_h = 70.0
+
+        self._draw_section_card(
+            painter,
+            card_x,
+            32.0,
+            card_w,
+            card_h,
+            "CPU",
+            m["cpu_pct"],
+            m["cpu_temp"],
+            f"{m['cpu_ghz']:.1f} GHz",
+        )
+
+        self._draw_section_card(
+            painter,
+            card_x,
+            109.0,
+            card_w,
+            card_h,
+            "GPU",
+            m["gpu_pct"],
+            m["gpu_temp"],
+            f"{m['gpu_mhz']} MHz",
+        )
+
+        self._draw_section_card(
+            painter,
+            card_x,
+            186.0,
+            card_w,
+            card_h,
+            "RAM",
+            m["ram_pct"],
+            None,
+            f"{m['ram_used']}/{m['ram_total']}G",
+        )
+
+        foot_y = 263.0
+        foot_h = 66.0
+        foot_rect = QRectF(card_x, foot_y, card_w, foot_h)
+        foot_path = QPainterPath()
+        foot_path.addRoundedRect(foot_rect, 11.0, 11.0)
+        painter.fillPath(foot_path, QColor(21, 26, 41, 235))
+        painter.setPen(QPen(QColor(36, 45, 70, 255), 1.0))
+        painter.drawPath(foot_path)
+
+        painter.setFont(QFont("Noto Sans", 7, QFont.Weight.ExtraBold))
+        painter.setPen(QColor(148, 163, 184))
+        painter.drawText(
+            QRect(int(card_x + 9), int(foot_y + 7), int(card_w - 18), 14),
+            Qt.AlignmentFlag.AlignLeft,
+            "NVMe & SWAP",
+        )
+
+        painter.setFont(QFont("Noto Sans", 8, QFont.Weight.Bold))
+        painter.setPen(QColor(248, 250, 252))
+        painter.drawText(
+            QRect(int(card_x + 9), int(foot_y + 25), int(card_w - 18), 16),
+            Qt.AlignmentFlag.AlignLeft,
+            "Disk Temp",
+        )
+        painter.setPen(self._temp_color(m["nvme_temp"]))
+        painter.drawText(
+            QRect(int(card_x + 9), int(foot_y + 25), int(card_w - 18), 16),
+            Qt.AlignmentFlag.AlignRight,
+            f"{m['nvme_temp']:.0f}°C",
+        )
+
+        painter.setPen(QColor(148, 163, 184))
+        painter.setFont(QFont("Noto Sans", 8, QFont.Weight.DemiBold))
+        painter.drawText(
+            QRect(int(card_x + 9), int(foot_y + 44), int(card_w - 18), 16),
+            Qt.AlignmentFlag.AlignLeft,
+            "Swap Used",
+        )
+        painter.setPen(QColor(96, 165, 250))
+        painter.drawText(
+            QRect(int(card_x + 9), int(foot_y + 44), int(card_w - 18), 16),
+            Qt.AlignmentFlag.AlignRight,
+            f"{m['swap_used']:.1f} GB",
+        )
+
+
+def main():
+    app = QApplication(sys.argv)
+    bar = RightStickyMonitorBar()
+    bar.show()
+    sys.exit(app.exec())
+
+
+if __name__ == "__main__":
+    main()

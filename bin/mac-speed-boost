@@ -1,0 +1,75 @@
+#!/usr/bin/env bash
+# Universal KDE Plasma 5 & 6 Speed Boost & Performance Optimizer
+set -euo pipefail
+
+MODE="${1:---apply}"
+
+KWRITE=$(command -v kwriteconfig6 || command -v kwriteconfig5 || echo "kwriteconfig6")
+QDBUS=$(command -v qdbus6 || command -v qdbus || command -v qdbus-qt5 || echo "qdbus6")
+BALOO=$(command -v balooctl6 || command -v balooctl || echo "")
+
+# Quick mode (triggered from Dynamic Island button): fast, non-blocking, no KWin reload
+if [[ "$MODE" == "--quick" ]]; then
+    pkill -f "kalendarac" 2>/dev/null || true
+    if [[ -n "$BALOO" ]]; then
+        "$BALOO" stop >/dev/null 2>&1 || true
+    fi
+    rm -rf "$HOME/.cache/thumbnails/normal/"* "$HOME/.cache/thumbnails/large/"* 2>/dev/null || true
+    FREE_MEM=$(awk '/MemAvailable/ {printf "%.1f GB", $2/1024/1024}' /proc/meminfo)
+    notify-send -a "Speed Boost" -i preferences-system-performance \
+        "⚡ Turbo Speed Boost" \
+        "Background indexers stopped & thumbnail cache cleaned.\nAvailable RAM: ${FREE_MEM}" 2>/dev/null || true
+    exit 0
+fi
+
+echo "⚡ Applying KDE Plasma Speed Boost..."
+
+# 1. Ultra-snappy KDE animation speed (0.35x duration = 3x faster, still smooth)
+"$KWRITE" --file kdeglobals --group KDE --key AnimationDurationFactor 0.35
+
+# 2. KWin Low-Latency Compositor & Effects Tuning
+"$KWRITE" --file kwinrc --group Compositing --key LatencyPolicy Low
+"$KWRITE" --file kwinrc --group Compositing --key GLCore true
+"$KWRITE" --file kwinrc --group Compositing --key WindowsBlockCompositing true
+"$KWRITE" --file kwinrc --group Compositing --key AnimationSpeed 2
+
+# Enable Magic Lamp minimize with fast 180ms duration
+"$KWRITE" --file kwinrc --group Plugins --key magiclampEnabled true
+"$KWRITE" --file kwinrc --group Effect-magiclamp --key AnimationDuration 180
+
+# Lightweight Frosted Glass Blur (zero noise overhead)
+"$KWRITE" --file kwinrc --group Plugins --key blurEnabled true
+"$KWRITE" --file kwinrc --group Effect-blur --key BlurStrength 6
+"$KWRITE" --file kwinrc --key NoiseStrength --group Effect-blur 0
+
+# Disable heavy/unnecessary KWin effects
+"$KWRITE" --file kwinrc --group Plugins --key wobblywindowsEnabled false
+"$KWRITE" --file kwinrc --group Plugins --key dimscreenEnabled false
+"$KWRITE" --file kwinrc --group Plugins --key diminactiveEnabled false
+
+# 3. Eliminate app launch cursor bounce & startup splash delay
+"$KWRITE" --file klaunchrc --group BusyCursorSettings --key Bouncing false
+"$KWRITE" --file klaunchrc --group FeedbackStyle --key BusyCursor false
+"$KWRITE" --file klaunchrc --group BusyCursorSettings --key Timeout 1
+"$KWRITE" --file ksplashrc --group KSplash --key Engine none
+"$KWRITE" --file ksplashrc --group KSplash --key Theme None
+
+# 4. Disable Baloo background file indexing disk/CPU drain
+"$KWRITE" --file baloofilerc --group "Basic Settings" --key "Indexing-Enabled" false
+if [[ -n "$BALOO" ]]; then
+    "$BALOO" disable >/dev/null 2>&1 || true
+    "$BALOO" stop >/dev/null 2>&1 || true
+fi
+
+# 5. Stop Akonadi/Kalendar reminder background bloat if running
+pkill -f "kalendarac" 2>/dev/null || true
+
+# 6. Reload KWin compositor configuration
+"$QDBUS" org.kde.KWin /KWin reconfigure >/dev/null 2>&1 || true
+
+FREE_MEM=$(awk '/MemAvailable/ {printf "%.1f GB", $2/1024/1024}' /proc/meminfo)
+notify-send -a "Speed Boost" -i preferences-system-performance \
+    "⚡ Speed Boost Active" \
+    "KWin Low-Latency + 0.35x Snappy Animations applied.\nAvailable RAM: ${FREE_MEM}" 2>/dev/null || true
+
+echo "✅ Speed Boost Complete! Available RAM: ${FREE_MEM}"
