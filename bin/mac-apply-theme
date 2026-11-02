@@ -1,130 +1,158 @@
 #!/usr/bin/env bash
+# ==============================================================================
+# Obsidian & Sapphire — apply theme, Windows 11 layout, shortcuts & live wallpaper
+# Usage: mac-apply-theme [--icons blue|purple|dracula] [--no-shortcuts] [--no-wallpaper]
+# ==============================================================================
 set -euo pipefail
 
-RAW_CHOICE="Tela-circle-blue-dark"
+ICON_CHOICE="blue"
+DO_SHORTCUTS=1
+DO_WALLPAPER=1
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --icons)
-            RAW_CHOICE="${2:-blue}"
-            shift 2
-            ;;
-        *)
-            RAW_CHOICE="$1"
-            shift
-            ;;
+        --icons) ICON_CHOICE="${2:-blue}"; shift 2 ;;
+        --no-shortcuts) DO_SHORTCUTS=0; shift ;;
+        --no-wallpaper) DO_WALLPAPER=0; shift ;;
+        -h|--help) sed -n '2,5p' "$0"; exit 0 ;;
+        *) ICON_CHOICE="$1"; shift ;;
     esac
 done
 
-case "$RAW_CHOICE" in
-    blue|Tela-circle-blue-dark)     ICON_THEME="Tela-circle-blue-dark" ;;
-    purple|Tela-circle-purple-dark) ICON_THEME="Tela-circle-purple-dark" ;;
+case "$ICON_CHOICE" in
+    blue|Tela-circle-blue-dark)       ICON_THEME="Tela-circle-blue-dark" ;;
+    purple|Tela-circle-purple-dark)   ICON_THEME="Tela-circle-purple-dark" ;;
     dracula|Tela-circle-dracula-dark) ICON_THEME="Tela-circle-dracula-dark" ;;
-    candy|candy-icons)              ICON_THEME="candy-icons" ;;
-    *)                              ICON_THEME="$RAW_CHOICE" ;;
+    *)                                ICON_THEME="$ICON_CHOICE" ;;
 esac
 
-KWRITE=$(command -v kwriteconfig6 || command -v kwriteconfig5 || echo "kwriteconfig6")
-QDBUS=$(command -v qdbus6 || command -v qdbus || command -v qdbus-qt5 || echo "qdbus6")
+KWRITE=$(command -v kwriteconfig6 || command -v kwriteconfig5 || echo kwriteconfig6)
+QDBUS=$(command -v qdbus6 || command -v qdbus || echo qdbus6)
+plasma_js() { "$QDBUS" org.kde.plasmashell /PlasmaShell org.kde.PlasmaShell.evaluateScript "$1" >/dev/null 2>&1 || true; }
 
-echo "✨ Applying Obsidian & Sapphire Desktop Experience (Icons: $ICON_THEME)..."
+echo "✨ Applying Obsidian & Sapphire (icons: $ICON_THEME)..."
 
-# 1. Sync ObsidianSapphire palette into Plasma theme & apply Color Scheme, Icons, Cursors, Wallpaper
-cp -f "$HOME/.local/share/color-schemes/ObsidianSapphire.colors" "$HOME/.local/share/plasma/desktoptheme/WhiteSur-dark/colors" 2>/dev/null || true
-plasma-apply-colorscheme ObsidianSapphire 2>/dev/null || true
-plasma-apply-desktoptheme WhiteSur-dark 2>/dev/null || true
-plasma-apply-cursortheme WhiteSur-cursors 2>/dev/null || true
-plasma-apply-wallpaperimage "$HOME/.local/share/wallpapers/Obsidian-Sapphire.png" 2>/dev/null || true
-
+# ------------------------------------------------------------------------------
+# 1. Look & feel: Breeze + ObsidianSapphire colours, Tela icons, Breeze cursors
+# ------------------------------------------------------------------------------
+plasma-apply-colorscheme ObsidianSapphire >/dev/null 2>&1 || true
+plasma-apply-desktoptheme default >/dev/null 2>&1 || true
+plasma-apply-cursortheme breeze_cursors >/dev/null 2>&1 || true
 "$KWRITE" --file kdeglobals --group Icons --key Theme "$ICON_THEME"
-"$KWRITE" --file kcminputrc --group Mouse --key cursorTheme WhiteSur-cursors
-"$KWRITE" --file plasmarc --group Theme --key name WhiteSur-dark
+"$KWRITE" --file kdeglobals --group KDE --key widgetStyle Breeze
 
-# Update GTK3 / GTK4 icon theme and right-side window buttons (Windows style)
 mkdir -p "$HOME/.config/gtk-3.0" "$HOME/.config/gtk-4.0"
 for gtk_ini in "$HOME/.config/gtk-3.0/settings.ini" "$HOME/.config/gtk-4.0/settings.ini"; do
-    cat << EOF > "$gtk_ini"
+    cat > "$gtk_ini" <<EOF
 [Settings]
 gtk-application-prefer-dark-theme=true
 gtk-icon-theme-name=$ICON_THEME
+gtk-cursor-theme-name=breeze_cursors
 gtk-decoration-layout=icon:minimize,maximize,close
 EOF
 done
 
-# 2. Configure Window Decorations: Windows-style RIGHT side (Minimize, Maximize, Close = IAX)
-"$KWRITE" --file kwinrc --group org.kde.kdecoration2 --key library org.kde.kwin.aurorae
-"$KWRITE" --file kwinrc --group org.kde.kdecoration2 --key theme "__aurorae__svg__WhiteSur-dark"
+# Window decoration: Breeze, Windows-style buttons on the right
+"$KWRITE" --file kwinrc --group org.kde.kdecoration2 --key library org.kde.breeze
+"$KWRITE" --file kwinrc --group org.kde.kdecoration2 --key theme Breeze
 "$KWRITE" --file kwinrc --group org.kde.kdecoration2 --key ButtonsOnLeft "M"
 "$KWRITE" --file kwinrc --group org.kde.kdecoration2 --key ButtonsOnRight "IAX"
-"$KWRITE" --file kwinrc --group org.kde.kdecoration2 --key BorderSize "None"
-
-# 3. Disable Top-Left Hot Corner toggle
 "$KWRITE" --file kwinrc --group ElectricBorders --key TopLeft "None"
+"$KWRITE" --file kwinrc --group Plugins --key minimizeallEnabled true
 
-# 4. Dynamically detect installed user applications for the Bottom Floating Dock
-LAUNCHERS="applications:cyber-launchpad.desktop,preferred://filemanager"
-for candidate in org.kde.konsole.desktop antigravity.desktop kiro.desktop code.desktop firefox-esr.desktop firefox.desktop google-chrome.desktop brave-browser.desktop systemsettings.desktop; do
+# ------------------------------------------------------------------------------
+# 2. Windows 11 taskbar: centred Start + pinned apps, tray & clock on the right
+# ------------------------------------------------------------------------------
+LAUNCHERS='"preferred://filemanager"'
+for candidate in org.kde.konsole.desktop firefox-esr.desktop firefox.desktop google-chrome.desktop \
+                 brave-browser.desktop code.desktop systemsettings.desktop; do
     if [[ -f "/usr/share/applications/$candidate" || -f "$HOME/.local/share/applications/$candidate" ]]; then
-        LAUNCHERS="${LAUNCHERS},applications:${candidate}"
+        LAUNCHERS="$LAUNCHERS,\"applications:$candidate\""
     fi
 done
 
-# 5. Configure Top Menu Bar (No top-left icon/toggle) + Bottom Floating Dock
-cat << EOF > /tmp/obsidian_layout.js
-var allPanels = panels();
-for (var i = 0; i < allPanels.length; i++) {
-    allPanels[i].remove();
-}
+plasma_js "
+panels().forEach(function (p) { p.remove(); });
+var p = new Panel;
+p.location = 'bottom'; p.height = 48; p.alignment = 'center';
+p.lengthMode = 'fill'; p.floating = false; p.hiding = 'none';
+var s1 = p.addWidget('org.kde.plasma.panelspacer'); s1.currentConfigGroup = ['General']; s1.writeConfig('expanding', true);
+var k = p.addWidget('org.kde.plasma.kickoff'); k.currentConfigGroup = ['General']; k.writeConfig('icon', 'start-here-kde-symbolic');
+var t = p.addWidget('org.kde.plasma.icontasks'); t.currentConfigGroup = ['General'];
+t.writeConfig('launchers', [$LAUNCHERS]); t.writeConfig('iconSpacing', 2);
+var s2 = p.addWidget('org.kde.plasma.panelspacer'); s2.currentConfigGroup = ['General']; s2.writeConfig('expanding', true);
+p.addWidget('org.kde.plasma.systemtray');
+var c = p.addWidget('org.kde.plasma.digitalclock'); c.currentConfigGroup = ['Appearance'];
+c.writeConfig('showDate', true); c.writeConfig('dateDisplayFormat', 'BelowTime'); c.writeConfig('use24hFormat', 0);
+p.addWidget('org.kde.plasma.showdesktop');
+"
 
-// --- 1. TOP MENU BAR ---
-var topBar = new Panel;
-topBar.location = "top";
-topBar.height = 28;
-topBar.floating = false;
-topBar.alignment = "center";
+# ------------------------------------------------------------------------------
+# 3. Laser Flow live wallpaper
+# ------------------------------------------------------------------------------
+if [[ "$DO_WALLPAPER" -eq 1 && -d "$HOME/.local/share/plasma/wallpapers/org.infant06.laserflow" ]]; then
+    plasma_js "
+desktops().forEach(function (d) {
+    d.wallpaperPlugin = 'org.infant06.laserflow';
+    d.currentConfigGroup = ['Wallpaper', 'org.infant06.laserflow', 'General'];
+    d.writeConfig('ShowTerminal', false);   // the real terminal (desktop-terminal) sits in the card
+});"
+fi
 
-topBar.addWidget("org.kde.plasma.appmenu");
+# ------------------------------------------------------------------------------
+# 4. KWin window rule: borderless real terminal inside the wallpaper card
+#    Geometry mirrors the wallpaper defaults (SurfaceLevel 0.5, CardWidth 0.56,
+#    radius 24, BottomReserve 56) on the primary screen.
+# ------------------------------------------------------------------------------
+# Primary monitor geometry from "0: +*eDP 1920/344x1080/194+0+0"
+GEOM=$(xrandr --listmonitors 2>/dev/null | awk '/\*/{print $3; exit}' || true)
+[[ -z "$GEOM" ]] && GEOM=$(xrandr --listmonitors 2>/dev/null | awk 'NR==2{print $3}' || true)
+if [[ "$GEOM" =~ ^([0-9]+)/[0-9]+x([0-9]+)/[0-9]+\+([0-9]+)\+([0-9]+)$ ]]; then
+    SW=${BASH_REMATCH[1]}; SH=${BASH_REMATCH[2]}; SX=${BASH_REMATCH[3]}; SY=${BASH_REMATCH[4]}
+else
+    SW=1920; SH=1080; SX=0; SY=0
+fi
+read -r TX TY TW TH < <(awk -v W="$SW" -v H="$SH" -v X="$SX" -v Y="$SY" 'BEGIN{
+    m = 14.4; top = 0.5*H; x = W/2 - 0.28*W + m; y = top + 10;
+    b = (1.2*H < H-56) ? 1.2*H : H-56;
+    printf "%d %d %d %d\n", X+x, Y+y, 0.56*W - 2*m, b - y - 12 }')
 
-var topSpacer = topBar.addWidget("org.kde.plasma.panelspacer");
-topSpacer.currentConfigGroup = ["General"];
-topSpacer.writeConfig("expanding", "true");
+R=(--file kwinrulesrc --group desktopterm)
+"$KWRITE" "${R[@]}" --key Description "Desktop terminal (Laser Flow card)"
+"$KWRITE" "${R[@]}" --key wmclass "desktopterm konsole"
+"$KWRITE" "${R[@]}" --key wmclasscomplete true
+"$KWRITE" "${R[@]}" --key wmclassmatch 1
+for kv in noborder:true below:true skiptaskbar:true skippager:true skipswitcher:true; do
+    "$KWRITE" "${R[@]}" --key "${kv%%:*}" "${kv#*:}"
+    "$KWRITE" "${R[@]}" --key "${kv%%:*}rule" 2
+done
+"$KWRITE" "${R[@]}" --key position "$TX,$TY"; "$KWRITE" "${R[@]}" --key positionrule 2
+"$KWRITE" "${R[@]}" --key size "$TW,$TH";     "$KWRITE" "${R[@]}" --key sizerule 2
+RULES=$(kreadconfig6 --file kwinrulesrc --group General --key rules 2>/dev/null || true)
+case ",$RULES," in
+    *,desktopterm,*) ;;
+    *) RULES="${RULES:+$RULES,}desktopterm"
+       "$KWRITE" --file kwinrulesrc --group General --key rules "$RULES"
+       "$KWRITE" --file kwinrulesrc --group General --key count "$(tr ',' '\n' <<<"$RULES" | grep -c .)" ;;
+esac
 
-topBar.addWidget("org.kde.plasma.systemtray");
+# ------------------------------------------------------------------------------
+# 5. Windows 11 keyboard shortcuts
+#    kglobalaccel keeps shortcuts in memory and overwrites the file on exit,
+#    so it is stopped while the file is edited.
+# ------------------------------------------------------------------------------
+if [[ "$DO_SHORTCUTS" -eq 1 ]]; then
+    "$HOME/.local/bin/mac-win11-shortcuts" || echo "  [!] Shortcuts not applied (see above)."
+fi
 
-var clock = topBar.addWidget("org.kde.plasma.digitalclock");
-clock.currentConfigGroup = ["Appearance"];
-clock.writeConfig("showDate", "true");
-clock.writeConfig("dateDisplayFormat", "BesideTime");
-clock.writeConfig("use24hFormat", "0");
+# ------------------------------------------------------------------------------
+# 6. Performance tuning, reload KWin, restart widgets & desktop terminal
+# ------------------------------------------------------------------------------
+"$HOME/.local/bin/mac-speed-boost" || true
+"$QDBUS" org.kde.KWin /KWin reconfigure >/dev/null 2>&1 || true
 
-topBar.addWidget("org.kde.plasma.showdesktop");
-
-// --- 2. BOTTOM FLOATING DOCK ---
-var dock = new Panel;
-dock.location = "bottom";
-dock.height = 56;
-dock.floating = true;
-dock.alignment = "center";
-dock.lengthMode = "fit";
-dock.hiding = "windowsgobelow";
-
-var tasks = dock.addWidget("org.kde.plasma.icontasks");
-tasks.currentConfigGroup = ["General"];
-tasks.writeConfig("launchers", "${LAUNCHERS}");
-tasks.writeConfig("iconSpacing", "1");
-
-dock.addWidget("org.kde.plasma.marginsseparator");
-dock.addWidget("org.kde.plasma.trash");
-EOF
-
-"$QDBUS" org.kde.plasmashell /PlasmaShell org.kde.PlasmaShell.evaluateScript "$(cat /tmp/obsidian_layout.js)" || true
-rm -f /tmp/obsidian_layout.js
-
-# 6. Apply Speed Boost & Reconfigure KWin
-"$HOME/.local/bin/mac-speed-boost"
-
-# 7. Restart Dynamic Island, Right-Side Monitor Bar & Floating Centered App Launcher
 systemctl --user daemon-reload
-systemctl --user enable --now mac-dynamic-island.service mac-side-monitor.service mac-app-launcher.service
-systemctl --user restart mac-dynamic-island.service mac-side-monitor.service mac-app-launcher.service
+systemctl --user enable mac-dynamic-island.service mac-side-monitor.service mac-app-launcher.service >/dev/null 2>&1 || true
+systemctl --user restart mac-dynamic-island.service mac-side-monitor.service mac-app-launcher.service || true
+(setsid "$HOME/.local/bin/desktop-terminal" >/dev/null 2>&1 &) || true
 
-echo "✅ Obsidian & Sapphire Desktop Experience is live!"
+echo "✅ Obsidian & Sapphire is live! (terminal card: ${TW}x${TH} at ${TX},${TY})"

@@ -1,19 +1,28 @@
 #!/usr/bin/env bash
+# Restore the KDE configuration saved by install.sh (~/.config/kde-backup-pre-mac/*.bak)
 set -euo pipefail
 
 BACKUP_DIR="$HOME/.config/kde-backup-pre-mac"
-QDBUS=$(command -v qdbus6 || command -v qdbus || command -v qdbus-qt5 || echo "qdbus6")
+QDBUS=$(command -v qdbus6 || command -v qdbus || echo qdbus6)
 
-echo "Restoring original KDE configuration from $BACKUP_DIR..."
+if [[ ! -d "$BACKUP_DIR" ]]; then
+    echo "No backup found at $BACKUP_DIR; nothing to restore."
+    exit 0
+fi
+echo "Restoring KDE configuration from $BACKUP_DIR..."
 
 systemctl --user disable --now mac-dynamic-island.service mac-side-monitor.service mac-app-launcher.service 2>/dev/null || true
 
-for f in kdeglobals kwinrc plasmarc plasma-org.kde.plasma.desktop-appletsrc klaunchrc krunnerrc kscreenlockerrc baloofilerc; do
-    if [ -f "$BACKUP_DIR/$f.bak" ]; then
-        cp -a "$BACKUP_DIR/$f.bak" "$HOME/.config/$f"
-    fi
+# kglobalaccel would overwrite restored shortcuts on exit, so stop it first
+systemctl --user stop plasma-kglobalaccel.service 2>/dev/null || true
+shopt -s nullglob
+for bak in "$BACKUP_DIR"/*.bak; do
+    f=$(basename "$bak" .bak)
+    cp -a "$bak" "$HOME/.config/$f"
+    echo "  restored $f"
 done
+systemctl --user start plasma-kglobalaccel.service 2>/dev/null || true
 
-"$QDBUS" org.kde.KWin /KWin reconfigure 2>/dev/null || true
+"$QDBUS" org.kde.KWin /KWin reconfigure >/dev/null 2>&1 || true
 systemctl --user restart plasma-plasmashell.service 2>/dev/null || true
-echo "✅ Original KDE configuration restored!"
+echo "✅ Original KDE configuration restored."

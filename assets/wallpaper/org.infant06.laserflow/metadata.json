@@ -1,0 +1,17 @@
+{
+    "KPackageStructure": "Plasma/Wallpaper",
+    "KPlugin": {
+        "Authors": [
+            {
+                "Name": "infant06"
+            }
+        ],
+        "Description": "ReactBits Laser Flow - A radiant beam of light that splashes onto your surface and pours over its corners (GPU shader)",
+        "Icon": "preferences-desktop-wallpaper",
+        "Id": "org.infant06.laserflow",
+        "License": "GPL-2.0+",
+        "Name": "Laser Flow",
+        "Version": "1.0"
+    },
+    "X-Plasma-API-Minimum-Version": "6.0"
+}

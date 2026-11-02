@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# Launch the real terminal that sits inside the Laser Flow wallpaper card.
+# Placement/borderless/below-windows come from the KWin rule "desktopterm".
+if xdotool search --classname '^desktopterm$' >/dev/null 2>&1; then exit 0; fi
+exec konsole --separate --profile DesktopTerm --hide-menubar --hide-toolbars --hide-tabbar -name desktopterm

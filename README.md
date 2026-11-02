@@ -1,126 +1,164 @@
 # Obsidian & Sapphire — KDE Plasma Desktop Suite
 
-![KDE Plasma 5 & 6](https://img.shields.io/badge/KDE_Plasma-5_%26_6-3B82F6?style=for-the-badge&logo=kde&logoColor=white)
-![Linux](https://img.shields.io/badge/Linux-Universal-1E293B?style=for-the-badge&logo=linux&logoColor=white)
+![KDE Plasma 6](https://img.shields.io/badge/KDE_Plasma-6-3B82F6?style=for-the-badge&logo=kde&logoColor=white)
+![X11](https://img.shields.io/badge/Session-X11-1E293B?style=for-the-badge&logo=linux&logoColor=white)
 ![Python](https://img.shields.io/badge/Python_3-PyQt6-2563EB?style=for-the-badge&logo=python&logoColor=white)
 ![License](https://img.shields.io/badge/License-MIT-10B981?style=for-the-badge)
 
-A cohesive, zero-lag **Obsidian (`#0D1017`) & Sapphire (`#3B82F6`)** desktop experience for **KDE Plasma**, featuring an interactive **Dynamic Island**, a **Right-Side Sticky Hardware & Thermal Monitor**, a **Floating Centered App Launcher** with full session/power controls, **Windows-style right-side compact window buttons**, **KDE Speed Boost optimizations**, and **100% zero Apple logos**.
+A dark **Obsidian (`#0D1017`) & Sapphire (`#3B82F6`)** desktop for KDE Plasma 6 with a
+**Windows 11 layout, shortcuts and touchpad gestures**, a **Laser Flow live wallpaper**
+(port of [ReactBits Laser Flow](https://reactbits.dev/c/animations/laser-flow)) with a
+**real terminal** inside it, plus a Dynamic Island, a side hardware monitor and an app launcher.
 
 ---
 
-## ✨ Key Features
+## Features
 
-1. **Interactive Dynamic Island (`mac-dynamic-island`)**
-   - Sits cleanly at the top center of the primary screen.
-   - **Compact Mode**: Live media indicator, equalizer visualizer, and active CPU/RAM/GPU telemetry summary.
-   - **Expanded Mode** (Click to toggle): Media playback controls (`Prev`, `Play/Pause`, `Next`), interactive **Volume** & **Brightness** sliders, and 1-click quick actions (**Speed Boost**, **Screenshot**, **Toggle Side Monitor**, **Lock Screen**).
-   - Engineered with single-step geometry transitions (no X11 pixmap thrashing or KWin freezes).
+### Windows 11 taskbar
+Single bottom panel: Start menu (Kickoff) and pinned apps centred; system tray, clock with date
+and show-desktop button on the right.
 
-2. **Right-Side Sticky Hardware & Thermal Monitor (`mac-side-monitor`)**
-   - Docked vertically along the right screen edge with a collapsible mini-pill tab (`‹` / `›`).
-   - Universal hardware auto-detection across **AMD, Intel, and NVIDIA** setups:
-     - **CPU**: Utilization `%`, live clock speed (`GHz`), and package temperature (`°C` via `k10temp`, `coretemp`, `zenpower`, or thermal zones).
-     - **GPU**: Utilization `%`, core clock (`MHz`), and temperature (`°C` via `nvidia-smi` or `/sys/class/drm/card*/device/hwmon` for AMD/Intel).
-     - **RAM**: Utilization `%` and `Used / Total GB`.
-     - **Disk / Swap**: NVMe/SSD composite temperature (`°C`) and active swap usage.
-   - Dynamic Sapphire-to-Rose thermal bar coloring when temperatures cross `65°C` / `80°C`.
+### Windows 11 keyboard shortcuts
 
-3. **Floating Centered App Launcher (`mac-app-launcher`)**
-   - Opens **dead-center horizontally**, floating right above the bottom dock when clicking the **All Applications** dock icon.
-   - Instant search bar (`Enter` launches top result, `Esc` or clicking outside dismisses).
-   - Category filter pills: `All Apps`, `★ Pinned`, `Development`, `Internet`, `System`, `Utilities`, and `Security & Kali`.
-   - **Bottom System & Power Footer Bar**:
-     - Quick system shortcuts: `⚙ Settings`, `📁 Files`, `>_ Terminal`, `📊 Activity`.
-     - Session & power controls: `🌙 Sleep`, `🔒 Lock`, `⇥ Log Out`, `↻ Restart`, and `⏻ Power Off` with **inline confirmation** to prevent accidental shutdowns.
+| Keys | Action |
+| :--- | :--- |
+| `Win` | Start menu |
+| `Win+Tab` | Task View (Overview) |
+| `Alt+Tab` | Switch apps |
+| `Win+D` / `Win+M` | Show desktop / minimize all |
+| `Win+←` / `Win+→` | Snap window left / right |
+| `Win+↑` / `Win+↓` | Maximize / minimize |
+| `Win+Ctrl+←/→` | Switch virtual desktop |
+| `Win+E` | File manager |
+| `Win+I` | Settings |
+| `Win+R` | Run (KRunner) |
+| `Win+L` | Lock |
+| `Win+V` | Clipboard history |
+| `Win+Shift+S` | Screenshot of a region |
+| `Win+1…9` | Open pinned taskbar app |
+| `Ctrl+Shift+Esc` | System Monitor |
+| `Ctrl+Alt+T` | Terminal |
 
-4. **Windows-Style Right-Side Compact Window Controls (`IAX`)**
-   - Window buttons (`Minimize`, `Maximize`, `Close`) placed on the **right side** (`ButtonsOnRight=IAX`) across all KDE and GTK applications.
-   - Custom `13×13px` geometric SVG buttons with permanently visible crisp inner symbols (`—`, `□`, `✕`) in cohesive **Slate/Indigo**, **Sapphire Blue**, and **Crimson Rose**.
+### Touchpad gestures (X11, via libinput-gestures)
 
-5. **Zero Apple Logos + Tela Circle Icon Pack**
-   - Automatically installs `Tela-circle-blue-dark` (plus `purple` and `dracula` variants) and replaces all upstream Apple logos with a custom **Sapphire Bento Grid** icon.
+| Gesture | Action |
+| :--- | :--- |
+| 3 fingers up | Task View |
+| 3 fingers down | Show desktop |
+| 3 fingers left / right | Switch apps |
+| 3 fingers hold | Search (KRunner) |
+| 4 fingers left / right | Switch virtual desktop |
 
-6. **KDE Speed Boost (`mac-speed-boost`)**
-   - Tunes KWin compositing (`AnimationSpeed=1`, `LatencyPolicy=ExtremelyLow`), disables heavy background blur/translucency lag, and disables `baloo_file` indexing overhead.
+Tap-to-click and natural scrolling are enabled. Edit `~/.config/libinput-gestures.conf` to change gestures.
+
+### Laser Flow live wallpaper
+A GPU shader port of ReactBits Laser Flow: a beam lands on a rounded card, spreads along its
+edge and pours over the corners, with fog, dust and flow lines. Everything is adjustable in
+**Right-click desktop → Configure Desktop and Wallpaper** (colour, beam, fog, card size, FPS,
+render resolution). Defaults (24 fps, 50% resolution) keep GPU load moderate on integrated graphics.
+
+### Real desktop terminal
+A borderless Konsole window placed inside the wallpaper card. It starts at login, runs
+**fastfetch** (Kali logo + live system info) and leaves you at your normal shell — click it and type.
+It stays below other windows and out of the taskbar and Alt+Tab.
+Restart it with `desktop-terminal` if you close it.
+
+### Widgets (PyQt6, systemd user services)
+- **Dynamic Island** (`mac-dynamic-island`): top-centre media controls, volume/brightness, quick actions.
+- **Side monitor** (`mac-side-monitor`): CPU / GPU / RAM / disk usage and temperatures on the right edge.
+- **App launcher** (`mac-app-launcher`): floating centred launcher with search, categories and power menu.
+
+### Look
+Breeze with the **ObsidianSapphire** colour scheme, **Tela-circle** icons, Breeze cursors and
+window buttons on the right (minimize, maximize, close).
 
 ---
 
-## 🚀 Quick Installation
-
-Works out-of-the-box on **Debian / Ubuntu / Kali / KDE neon**, **Arch / Manjaro / EndeavourOS**, **Fedora**, and **openSUSE**:
+## Install
 
 ```bash
 git clone https://github.com/infant06/obsidian-sapphire-kde.git
 cd obsidian-sapphire-kde
-chmod +x install.sh uninstall.sh
 ./install.sh
 ```
 
-### Installer Options
+The installer runs in this order, so a failed package install leaves your desktop untouched:
+
+1. Installs **all** required packages (apt / pacman / dnf / zypper), libinput-gestures and the Tela icons.
+2. Backs up your KDE config to `~/.config/kde-backup-pre-mac/` (first install only).
+3. Copies the colour scheme, wallpaper plugin, Konsole profile and fastfetch config.
+4. Installs scripts into `~/.local/bin/`.
+5. Installs the systemd user services.
+6. Configures the touchpad.
+7. Applies the theme, taskbar, shortcuts, wallpaper and desktop terminal.
+
+Log out and back in once afterwards (needed for touchpad gestures).
+
+### Options
 
 ```bash
-# Install with default Tela-circle-blue-dark icons:
-./install.sh
-
-# Or choose a specific icon variant during install:
-./install.sh --icons purple
-./install.sh --icons dracula
-./install.sh --icons candy
-
-# Skip package manager check if dependencies are already installed:
-./install.sh --no-deps
+./install.sh --icons purple     # blue (default), purple, dracula
+./install.sh --no-deps          # skip package installation
+./install.sh --no-gestures      # skip touchpad gestures
 ```
 
 ---
 
-## 🛠️ Post-Install Commands & Customization
-
-All utilities are installed into `~/.local/bin/`:
+## Commands
 
 | Command | Description |
 | :--- | :--- |
-| `~/.local/bin/mac-app-launcher --toggle` | Toggle the Floating Centered App Launcher |
-| `~/.local/bin/mac-side-monitor` | Run or toggle the Right-Side Sticky Hardware Monitor |
-| `~/.local/bin/mac-speed-boost` | Apply full KDE Plasma & KWin speed optimizations |
-| `~/.local/bin/mac-apply-theme --icons <variant>` | Switch icon theme (`blue`, `purple`, `dracula`, `candy`) and re-sync layout |
-| `./uninstall.sh` | Stop services and restore your pre-installation KDE backup (`~/.config/kde-backup-pre-mac`) |
-
-### Systemd User Services
-
-The three desktop widgets run as lightweight `systemd --user` services and start automatically on login:
-
-```bash
-systemctl --user status mac-dynamic-island.service
-systemctl --user status mac-side-monitor.service
-systemctl --user status mac-app-launcher.service
-```
+| `mac-apply-theme [--icons <variant>]` | Re-apply theme, taskbar, shortcuts, wallpaper and terminal placement |
+| `mac-win11-shortcuts` | Re-apply only the Windows 11 shortcuts |
+| `desktop-terminal` | Start the desktop terminal if it is not running |
+| `desk-fetch` | Print the fastfetch summary |
+| `mac-speed-boost` | Faster animations, disable Baloo indexing and splash screen |
+| `mac-app-launcher --toggle` | Toggle the app launcher |
+| `./uninstall.sh` | Stop everything, remove files and restore your backup |
 
 ---
 
-## 📁 Repository Structure
+## Notes
+
+- Built and tested on **Kali Linux, KDE Plasma 6.6, X11**. On Wayland, use Plasma's built-in
+  touchpad gestures instead of libinput-gestures.
+- The terminal window position is calculated for the primary screen. If you change the card size
+  in the wallpaper settings, adjust **System Settings → Window Management → Window Rules →
+  Desktop terminal**, or re-run `mac-apply-theme`.
+- If the panel ever disappears after resume (frozen vsync on some AMD laptops), run
+  `xrandr --output eDP --rate 40.04; xrandr --output eDP --rate 60.06` and re-login.
+
+---
+
+## Repository structure
 
 ```text
 obsidian-sapphire-kde/
-├── install.sh                         # Universal one-step installer (apt/pacman/dnf/zypper)
-├── uninstall.sh                       # Clean uninstaller & KDE config backup restorer
+├── install.sh                      # Packages first, then backup, files, apply
+├── uninstall.sh                    # Remove everything and restore backup
 ├── bin/
-│   ├── mac-dynamic-island             # Top-center interactive Dynamic Island (PyQt6)
-│   ├── mac-side-monitor               # Right-side sticky CPU/GPU/RAM/Temp monitor (PyQt6)
-│   ├── mac-app-launcher               # Floating centered app launcher + power bar (PyQt6)
-│   ├── mac-speed-boost                # KDE & KWin performance optimizer
-│   ├── mac-apply-theme                # Dynamic KDE Plasma panel, dock & theme configurator
-│   └── mac-restore-backup             # Restores ~/.config/kde-backup-pre-mac
+│   ├── mac-apply-theme             # Theme, Win11 taskbar, wallpaper, terminal window rule
+│   ├── mac-win11-shortcuts         # Windows 11 global shortcuts
+│   ├── mac-speed-boost             # Plasma performance tweaks
+│   ├── mac-restore-backup          # Restore ~/.config/kde-backup-pre-mac/*.bak
+│   ├── desktop-terminal            # Launch the real terminal inside the wallpaper card
+│   ├── desk-fetch                  # fastfetch with the desktop layout
+│   ├── mac-dynamic-island          # Dynamic Island (PyQt6)
+│   ├── mac-side-monitor            # Side hardware monitor (PyQt6)
+│   └── mac-app-launcher            # App launcher (PyQt6)
 ├── assets/
-│   ├── aurorae/WhiteSur-dark/         # Custom right-side 13px Sapphire/Indigo/Rose window buttons
-│   ├── color-schemes/                 # ObsidianSapphire.colors KDE color scheme
-│   ├── icons/                         # Custom Sapphire Bento launcher & start SVG icons
-│   └── wallpapers/                    # Resolution-independent Obsidian & Sapphire wallpaper generator
-└── systemd/                           # Portable systemd --user service units (%h/.local/bin/...)
+│   ├── wallpaper/org.infant06.laserflow/   # Laser Flow Plasma wallpaper plugin
+│   ├── konsole/                    # DesktopTerm profile + transparent colour scheme
+│   ├── fastfetch/desktop.jsonc     # fastfetch layout for the desktop terminal
+│   ├── gestures/                   # libinput-gestures config
+│   ├── color-schemes/              # ObsidianSapphire.colors
+│   └── icons/                      # Launcher icon
+└── systemd/                        # systemd --user units for the widgets
 ```
 
----
+## License
 
-## 📄 License
-
-Released under the [MIT License](LICENSE).
+Released under the [MIT License](LICENSE), except the Laser Flow shader
+(`assets/wallpaper/org.infant06.laserflow/contents/shaders/`), which is a port of
+[ReactBits Laser Flow](https://github.com/DavidHDev/react-bits) © David Haz and remains under its
+MIT + Commons Clause license.

@@ -1,0 +1,50 @@
+#!/usr/bin/env bash
+# ==============================================================================
+# Obsidian & Sapphire — Windows 11 style global shortcuts for KDE Plasma 6
+#   Win+Tab Task View · Alt+Tab switch · Win+Up/Down maximize/minimize · Win+M minimize all
+#   Win+E files · Win+I settings · Win+R run · Win+Shift+S snip · Ctrl+Shift+Esc monitor
+#   Ctrl+Alt+T terminal · Print screenshot
+# ==============================================================================
+set -euo pipefail
+
+KWRITE=$(command -v kwriteconfig6 || echo kwriteconfig6)
+FILE="kglobalshortcutsrc"
+TAB=$'\t'
+SERVICE="plasma-kglobalaccel.service"
+
+running=0
+if systemctl --user is-active --quiet "$SERVICE" 2>/dev/null; then
+    running=1
+    systemctl --user stop "$SERVICE"
+    sleep 1
+fi
+
+k() { "$KWRITE" --file "$FILE" "$@"; }
+
+# KWin (value format: current,default,friendly name; multiple keys separated by a TAB)
+k --group kwin --key "Overview"                       "Meta+Tab${TAB}Meta+W,Meta+W,Toggle Overview"
+k --group kwin --key "Walk Through Windows"           "Alt+Tab,Meta+Tab${TAB}Alt+Tab,Walk Through Windows"
+k --group kwin --key "Walk Through Windows (Reverse)" "Alt+Shift+Tab,Meta+Shift+Tab${TAB}Alt+Shift+Tab,Walk Through Windows (Reverse)"
+k --group kwin --key "Window Maximize"                "Meta+Up${TAB}Meta+PgUp,Meta+PgUp,Maximize Window"
+k --group kwin --key "Window Minimize"                "Meta+Down${TAB}Meta+PgDown,Meta+PgDown,Minimize Window"
+k --group kwin --key "Window Quick Tile Top"          "none,Meta+Up,Quick Tile Window to the Top"
+k --group kwin --key "Window Quick Tile Bottom"       "none,Meta+Down,Quick Tile Window to the Bottom"
+k --group kwin --key "MinimizeAll"                    "Meta+M,Meta+Shift+D,MinimizeAll"
+
+# Application launch shortcuts
+k --group services --group org.kde.dolphin.desktop             --key _launch "Meta+E"
+k --group services --group systemsettings.desktop              --key _launch "Meta+I"
+k --group services --group org.kde.krunner.desktop             --key _launch "Meta+R${TAB}Alt+Space"
+k --group services --group org.kde.plasma-systemmonitor.desktop --key _launch "Ctrl+Shift+Esc"
+k --group services --group org.kde.konsole.desktop             --key _launch "Ctrl+Alt+T"
+k --group services --group org.kde.spectacle.desktop           --key RectangularRegionScreenShot "Meta+Shift+S"
+k --group services --group org.kde.spectacle.desktop           --key _launch "Print"
+# Spectacle's default "Record Region" also grabs Meta+R; keep it on Meta+Shift+R only
+k --group services --group org.kde.spectacle.desktop           --key RecordRegion "Meta+Shift+R"
+
+if [[ "$running" -eq 1 ]]; then
+    systemctl --user start "$SERVICE"
+    echo "⌨  Windows 11 shortcuts applied."
+else
+    echo "⌨  Windows 11 shortcuts written; they take effect after you log out and back in."
+fi

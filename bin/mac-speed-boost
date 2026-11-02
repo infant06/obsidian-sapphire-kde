@@ -27,9 +27,11 @@ echo "⚡ Applying KDE Plasma Speed Boost..."
 # 1. Ultra-snappy KDE animation speed (0.35x duration = 3x faster, still smooth)
 "$KWRITE" --file kdeglobals --group KDE --key AnimationDurationFactor 0.35
 
-# 2. KWin Low-Latency Compositor & Effects Tuning
-"$KWRITE" --file kwinrc --group Compositing --key LatencyPolicy Low
-"$KWRITE" --file kwinrc --group Compositing --key GLCore true
+# 2. KWin compositor & effects tuning
+# LatencyPolicy/GLCore are left at KWin defaults: forcing them gave no measurable gain
+# and they were removed while debugging a frozen-panel issue on AMD/X11.
+"$KWRITE" --file kwinrc --group Compositing --key LatencyPolicy --delete
+"$KWRITE" --file kwinrc --group Compositing --key GLCore --delete
 "$KWRITE" --file kwinrc --group Compositing --key WindowsBlockCompositing true
 "$KWRITE" --file kwinrc --group Compositing --key AnimationSpeed 2
 
@@ -70,6 +72,6 @@ pkill -f "kalendarac" 2>/dev/null || true
 FREE_MEM=$(awk '/MemAvailable/ {printf "%.1f GB", $2/1024/1024}' /proc/meminfo)
 notify-send -a "Speed Boost" -i preferences-system-performance \
     "⚡ Speed Boost Active" \
-    "KWin Low-Latency + 0.35x Snappy Animations applied.\nAvailable RAM: ${FREE_MEM}" 2>/dev/null || true
+    "0.35x snappy animations applied, indexer stopped.\nAvailable RAM: ${FREE_MEM}" 2>/dev/null || true
 
 echo "✅ Speed Boost Complete! Available RAM: ${FREE_MEM}"

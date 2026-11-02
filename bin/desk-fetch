@@ -1,0 +1,68 @@
+#!/usr/bin/env bash
+# Prints a neofetch-style system summary. Uses fastfetch when installed,
+# otherwise a built-in Kali logo + info from the Laser Flow sysinfo script.
+if command -v fastfetch >/dev/null 2>&1; then
+    [ $# -gt 0 ] && exec fastfetch "$@"
+    exec fastfetch -c "$HOME/.config/fastfetch/desktop.jsonc"
+fi
+
+S="$HOME/.local/share/plasma/wallpapers/org.infant06.laserflow/contents/code/sysinfo.sh"
+declare -A I
+while IFS='=' read -r k v; do [ -n "$k" ] && I[$k]=$v; done < <("$S" static; "$S" live)
+
+B=$'\e[1;38;5;111m'; L=$'\e[38;5;69m'; R=$'\e[0m'; D=$'\e[2m'
+read -r mu mt <<<"${I[mem]}"; read -r su st <<<"${I[swap]}"
+gib() { awk -v m="$1" 'BEGIN{printf "%.2f GiB", m/1024}'; }
+
+logo=(
+"..............                       "
+"            ..,;:ccc,.               "
+"          ......''';lxO.             "
+".....''''..........,:ld;             "
+"           .';;;:::;,,.x,            "
+"      ..'''.            0Xxoc:,.  ..."
+"  ....                ,ONkc;,;cokOdc',."
+" .                   OMo           ':ddo."
+"                    dMc               :OO;"
+"                    0M.                 .:o."
+"                    ;Wd                  "
+"                     ;XO,                "
+"                       ,d0Odlc;,..       "
+"                           ..',;:cdOOd::,."
+"                                    .:d;.':;."
+"                                       'd,  .'"
+"                                         ;l   .."
+"                                          .o   "
+"                                            c  "
+"                                            .' "
+"                                             . "
+)
+t="${I[user]}@${I[host]}"
+info=(
+"${B}${I[user]}${R}@${B}${I[host]}${R}"
+"${D}$(printf '%*s' ${#t} '' | tr ' ' '-')${R}"
+"${B}OS${R}: ${I[os]}"
+"${B}Host${R}: ${I[model]}"
+"${B}Kernel${R}: ${I[kernel]}"
+"${B}Uptime${R}: ${I[uptime]}"
+"${B}Packages${R}: ${I[packages]}"
+"${B}Shell${R}: ${I[shell]}"
+"${B}DE${R}: ${I[de]}"
+"${B}WM${R}: ${I[wm]}"
+"${B}Theme${R}: ${I[theme]}"
+"${B}Icons${R}: ${I[icons]}"
+"${B}Terminal${R}: ${I[terminal]}"
+"${B}CPU${R}: ${I[cpu]}${I[tcpu]:+  ${I[tcpu]}°C}"
+"${B}GPU${R}: ${I[gpu1]}"
+"${B}GPU${R}: ${I[gpu2]}${I[tgpu]:+  ${I[tgpu]}°C}"
+"${B}Memory${R}: $(gib "$mu") / $(gib "$mt") ($((100*mu/mt))%)"
+"${B}Swap${R}: $(gib "$su") / $(gib "$st")"
+"${B}Disk (/)${R}: ${I[disk]}"
+"${B}Battery${R}: ${I[battery]}"
+"${B}Local IP${R}: ${I[ip]}"
+)
+echo
+for i in "${!logo[@]}"; do
+    printf "  ${L}%-48s${R} %s\n" "${logo[$i]}" "${info[$i]}"
+done
+printf "  %-48s " ""; for c in 0 1 2 3 4 5 6 7; do printf "\e[4${c}m   "; done; printf "${R}\n\n"

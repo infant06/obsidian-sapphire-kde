@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<kcfg xmlns="http://www.kde.org/standards/kcfg/1.0"
+      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xsi:schemaLocation="http://www.kde.org/standards/kcfg/1.0 http://www.kde.org/standards/kcfg/1.0/kcfg.xsd">
+  <kcfgfile name=""/>
+  <group name="General">
+    <!-- Performance -->
+    <entry name="Fps" type="Int"><default>24</default></entry>
+    <entry name="Quality" type="Double"><default>0.5</default></entry>
+    <!-- Surface: 0 = card (beam pours over its corners), 1 = flat floor -->
+    <entry name="SurfaceMode" type="Int"><default>0</default></entry>
+    <entry name="SurfaceLevel" type="Double"><default>0.5</default></entry>
+    <entry name="CardWidth" type="Double"><default>0.56</default></entry>
+    <entry name="CardBottom" type="Double"><default>1.2</default></entry>
+    <entry name="CardRadius" type="Double"><default>24</default></entry>
+    <entry name="ShowTerminal" type="Bool"><default>true</default></entry>
+    <entry name="BottomReserve" type="Int"><default>56</default></entry>
+    <!-- ReactBits LaserFlow props (same defaults as the component) -->
+    <entry name="BeamPosition" type="Double"><default>0.6</default></entry>
+    <entry name="Color" type="Color"><default>#3847ff</default></entry>
+    <entry name="Background" type="Color"><default>#060010</default></entry>
+    <entry name="Intensity" type="Double"><default>1.8</default></entry>
+    <entry name="BeamWidth" type="Double"><default>1.5</default></entry>
+    <entry name="Flare" type="Double"><default>1.5</default></entry>
+    <entry name="Spread" type="Double"><default>1.5</default></entry>
+    <entry name="Spill" type="Double"><default>1.0</default></entry>
+    <entry name="Fog" type="Double"><default>0.2</default></entry>
+    <entry name="Dust" type="Double"><default>1.6</default></entry>
+    <entry name="Streaks" type="Double"><default>1.5</default></entry>
+    <entry name="Dots" type="Double"><default>1.0</default></entry>
+    <entry name="Pulse" type="Double"><default>1.5</default></entry>
+    <entry name="Speed" type="Double"><default>1.5</default></entry>
+    <entry name="Seed" type="Double"><default>3</default></entry>
+  </group>
+</kcfg>
